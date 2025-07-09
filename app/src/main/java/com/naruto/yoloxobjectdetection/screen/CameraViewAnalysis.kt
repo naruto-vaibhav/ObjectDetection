@@ -1,7 +1,6 @@
 package com.naruto.yoloxobjectdetection.screen
 
 import android.util.Log
-import android.util.Size
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -9,10 +8,12 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -44,7 +45,6 @@ fun CameraViewAndAnalysis(modifier: Modifier = Modifier) {
         }
 
         val imageAnalyzer = ImageAnalysis.Builder()
-            .setTargetResolution(Size(640, 640))
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .build()
             .apply {
@@ -70,35 +70,38 @@ fun CameraViewAndAnalysis(modifier: Modifier = Modifier) {
             cameraExecutor.shutdown()
         }
     }
+    Column {
+        Box(modifier = modifier.fillMaxWidth().weight(0.9f)) {
+            AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val scaleX = size.width / 640f
+                val scaleY = size.height / 640f
+                detections.forEach { d ->
+                    val left = d.left * scaleX
+                    val top = d.top * scaleY
+                    val right = d.right * scaleX
+                    val bottom = d.bottom * scaleY
 
-    Box(modifier = modifier.fillMaxSize()) {
-        AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val scaleX = size.width / 640f
-            val scaleY = size.height / 640f
-            detections.forEach { d ->
-                val left = d.left * scaleX
-                val top = d.top * scaleY
-                val right = d.right * scaleX
-                val bottom = d.bottom * scaleY
-
-                drawRect(
-                    color = Color.Red,
-                    topLeft = Offset(left, top),
-                    size = androidx.compose.ui.geometry.Size(right - left, bottom - top),
-                    style = Stroke(width = 2f)
-                )
-                drawContext.canvas.nativeCanvas.drawText(
-                    "Class ${d.classId} ${(d.score * 100).toInt()}%",
-                    left,
-                    top - 10,
-                    android.graphics.Paint().apply {
-                        color = android.graphics.Color.YELLOW
-                        textSize = 30f
-                        isAntiAlias = true
-                    }
-                )
+                    drawRect(
+                        color = Color.Red,
+                        topLeft = Offset(left, top),
+                        size = androidx.compose.ui.geometry.Size(right - left, bottom - top),
+                        style = Stroke(width = 2f)
+                    )
+                    drawContext.canvas.nativeCanvas.drawText(
+                        "Class ${d.classId} ${(d.score * 100).toInt()}%",
+                        left,
+                        top - 10,
+                        android.graphics.Paint().apply {
+                            color = android.graphics.Color.YELLOW
+                            textSize = 30f
+                            isAntiAlias = true
+                        }
+                    )
+                }
             }
         }
+        Text(modifier = Modifier.fillMaxWidth().weight(0.1f), text = "Accuracy = ${if (detections.isEmpty()) 0 else detections[0].score}")
     }
+
 }

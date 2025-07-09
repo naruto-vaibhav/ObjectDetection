@@ -19,12 +19,13 @@ import java.nio.MappedByteBuffer
 
 
 class YoloXAnalyzer(
-    private val context: Context,
+    context: Context,
     private val onDetections: (List<Detection>) -> Unit
 ) : ImageAnalysis.Analyzer {
     companion object{
         private const val TAG = "YoloXAnalyzer"
         private const val MODEL = "Yolo-X.tflite"
+        private const val TV_CLASS = 62
     }
 
     private var tfLite: InterpreterApi? = null
@@ -60,6 +61,36 @@ class YoloXAnalyzer(
         }
     }
 
+    fun Bitmap.resizeAndPadTo640(): Bitmap {
+        val targetSize = 640
+        val aspectRatio = width.toFloat() / height.toFloat()
+
+        val newWidth: Int
+        val newHeight: Int
+
+        if (width >= height) {
+            newWidth = targetSize
+            newHeight = (targetSize / aspectRatio).toInt()
+        } else {
+            newHeight = targetSize
+            newWidth = (targetSize * aspectRatio).toInt()
+        }
+
+        // Resize bitmap keeping aspect ratio
+        val scaledBitmap = Bitmap.createScaledBitmap(this, newWidth, newHeight, true)
+
+        // Create a blank 640x640 bitmap and draw the scaled image centered
+        val paddedBitmap = Bitmap.createBitmap(targetSize, targetSize, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(paddedBitmap)
+        val left = (targetSize - newWidth) / 2f
+        val top = (targetSize - newHeight) / 2f
+        canvas.drawColor(android.graphics.Color.BLACK)
+        canvas.drawBitmap(scaledBitmap, left, top, null)
+
+        return paddedBitmap
+    }
+
+
     override fun analyze(imageProxy: ImageProxy) {
         Log.i(TAG,"analyze")
         val bitmap = imageProxy.toBitmap(imageProxy.imageInfo.rotationDegrees) ?: return
@@ -82,25 +113,37 @@ class YoloXAnalyzer(
         val detections = mutableListOf<Detection>()
         for (i in 0 until 8400) {
             val score = outputScores[0][i]
-            if (score > 0.4f) {
+            val classId = outputClasses[0][i].toInt() and 0xFF
+            if (score > 0.1f && classId==62) {
                 val box = outputBoxes[0][i]
-                val classId = outputClasses[0][i].toInt() and 0xFF
                 val x = box[0]
                 val y = box[1]
                 val w = box[2]
                 val h = box[3]
-
-                val left = x - w / 2
-                val top = y - h / 2
-                val right = x + w / 2
-                val bottom = y + h / 2
-
-                detections.add(Detection(left, top, right, bottom, score, classId))
+                detections.add(Detection(x, y, w, h, score, classId))
             }
         }
-        Log.i(TAG,"detections - ${detections.toList()}")
-        onDetections(detections)
+        if (detections.isEmpty()){
+            onDetections(emptyList())
+        }
+        else{
+            onDetections(listOf(weightedBoxFusion(detections)))
+        }
+
         imageProxy.close()
+    }
+
+    private fun weightedBoxFusion(detections: List<Detection>): Detection {
+        val totalScore = detections.sumOf { it.score.toDouble() }.toFloat()
+        val left = detections.sumOf { it.left.toDouble() * it.score }.toFloat() / totalScore
+        val top = detections.sumOf { it.top.toDouble() * it.score }.toFloat() / totalScore
+        val right = detections.sumOf { it.right.toDouble() * it.score }.toFloat() / totalScore
+        val bottom = detections.sumOf { it.bottom.toDouble() * it.score }.toFloat() / totalScore
+        val score = detections.maxOfOrNull { it.score } ?: 0.0F
+
+        return Detection(left, top, right, bottom, score, detections.first().classId).also {
+            Log.i(TAG,"detection - $it")
+        }
     }
 
     private fun ImageProxy.toBitmap(rotationDegrees: Int): Bitmap? {
@@ -130,7 +173,7 @@ class YoloXAnalyzer(
     }
 
     private fun Bitmap.preprocessToYoloXInput(): ByteBuffer {
-        val inputImage = this.scale(640, 640)
+        val inputImage = this.scale(640,640)
         val byteBuffer = ByteBuffer.allocateDirect(1 * 640 * 640 * 3 * 4) // 4 bytes per float
         byteBuffer.order(ByteOrder.nativeOrder())
 
